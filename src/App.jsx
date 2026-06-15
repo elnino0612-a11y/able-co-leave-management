@@ -31,6 +31,17 @@ const MENU = [
   { key: "settings", label: "설정", icon: Settings },
 ];
 
+const EMPTY_ARRAY = [];
+const EMPTY_OBJECT = {};
+
+const SUPPLEMENTAL_PUBLIC_HOLIDAYS = {
+  2026: [
+    { date: "2026-05-01", title: "노동절" },
+    { date: "2026-06-03", title: "제9회 전국동시지방선거" },
+    { date: "2026-07-17", title: "제헌절" },
+  ],
+};
+
 function todayMonth() {
   return new Date().getMonth() + 1;
 }
@@ -52,6 +63,46 @@ function getMonthFromDate(dateString) {
 function getYearFromDate(dateString) {
   if (!dateString) return 0;
   return Number(String(dateString).slice(0, 4));
+}
+
+function isDateBetween(dateString, startString, endString) {
+  const date = formatDate(dateString);
+  const start = formatDate(startString);
+  const end = formatDate(endString || startString);
+
+  if (!date || !start || !end) return false;
+
+  return date >= start && date <= end;
+}
+
+function isDateRangeInMonth(startString, endString, year, month) {
+  const start = formatDate(startString);
+  const end = formatDate(endString || startString);
+
+  if (!start || !end) return false;
+
+  const monthStart = `${year}-${pad2(month)}-01`;
+  const monthEnd = `${year}-${pad2(month)}-${pad2(getDaysInMonth(year, month))}`;
+
+  return start <= monthEnd && end >= monthStart;
+}
+
+function mergeSupplementalPublicHolidays(publicHolidays, year) {
+  const supplemental = SUPPLEMENTAL_PUBLIC_HOLIDAYS[year] || EMPTY_ARRAY;
+  const merged = [...publicHolidays];
+  const existingKeys = new Set(
+    publicHolidays.map((row) => `${formatDate(row.date)}-${row.title}`)
+  );
+
+  supplemental.forEach((holiday) => {
+    const key = `${holiday.date}-${holiday.title}`;
+
+    if (!existingKeys.has(key)) {
+      merged.push(holiday);
+    }
+  });
+
+  return merged;
 }
 
 function getDaysInMonth(year, month) {
@@ -157,13 +208,17 @@ function App() {
   const [editingDeductionId, setEditingDeductionId] = useState("");
   const [editingAdjustmentId, setEditingAdjustmentId] = useState("");
 
-  const employees = dashboard?.employees || [];
-  const leaveUses = dashboard?.leaveUses || [];
-  const adjustments = dashboard?.adjustments || [];
-  const holidayWorks = dashboard?.holidayWorks || [];
-  const vacationDeductions = dashboard?.vacationDeductions || [];
-  const publicHolidays = dashboard?.publicHolidays || [];
-  const kpi = dashboard?.kpi || {};
+  const employees = dashboard?.employees ?? EMPTY_ARRAY;
+  const leaveUses = dashboard?.leaveUses ?? EMPTY_ARRAY;
+  const adjustments = dashboard?.adjustments ?? EMPTY_ARRAY;
+  const holidayWorks = dashboard?.holidayWorks ?? EMPTY_ARRAY;
+  const vacationDeductions = dashboard?.vacationDeductions ?? EMPTY_ARRAY;
+  const apiPublicHolidays = dashboard?.publicHolidays ?? EMPTY_ARRAY;
+  const publicHolidays = useMemo(
+    () => mergeSupplementalPublicHolidays(apiPublicHolidays, selectedYear),
+    [apiPublicHolidays, selectedYear]
+  );
+  const kpi = dashboard?.kpi ?? EMPTY_OBJECT;
 
   async function loadDashboard(year = selectedYear) {
     try {
@@ -216,14 +271,7 @@ function App() {
 
   const monthVacationDeductions = useMemo(() => {
     return vacationDeductions.filter((row) => {
-      const start = row["시작일"];
-      const end = row["종료일"];
-
-      return (
-        getYearFromDate(start) === selectedYear &&
-        (getMonthFromDate(start) === selectedMonth ||
-          getMonthFromDate(end) === selectedMonth)
-      );
+      return isDateRangeInMonth(row["시작일"], row["종료일"], selectedYear, selectedMonth);
     });
   }, [vacationDeductions, selectedYear, selectedMonth]);
 
@@ -1195,8 +1243,8 @@ function CalendarPanel({
             (row) => formatDate(row["근무일자"]) === currentDate
           );
 
-          const vacationItems = monthVacationDeductions.filter(
-            (row) => formatDate(row["시작일"]) === currentDate
+          const vacationItems = monthVacationDeductions.filter((row) =>
+            isDateBetween(currentDate, row["시작일"], row["종료일"])
           );
 
           const allEmployeeHolidayWork = isAllEmployeeHolidayWork(holidayItems);
