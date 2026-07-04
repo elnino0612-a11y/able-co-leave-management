@@ -105,6 +105,71 @@ function mergeSupplementalPublicHolidays(publicHolidays, year) {
   return merged;
 }
 
+function getCompletedMonthlyLeaveCount(joinDateString, targetDateString) {
+  const joinDate = formatDate(joinDateString);
+  const targetDate = formatDate(targetDateString);
+
+  if (!joinDate || !targetDate || targetDate < joinDate) return 0;
+
+  const joinYear = getYearFromDate(joinDate);
+  const joinMonth = getMonthFromDate(joinDate);
+  const joinDay = Number(joinDate.slice(8, 10));
+  const targetYear = getYearFromDate(targetDate);
+  const targetMonth = getMonthFromDate(targetDate);
+  const targetDay = Number(targetDate.slice(8, 10));
+  let completedMonths = (targetYear - joinYear) * 12 + (targetMonth - joinMonth);
+
+  if (targetDay < joinDay) {
+    completedMonths -= 1;
+  }
+
+  return Math.max(0, Math.min(11, completedMonths));
+}
+
+function projectEmployeeLeaveToYearEnd(employees, year) {
+  const targetDate = `${year}-12-31`;
+
+  return employees.map((emp) => {
+    if (getYearFromDate(emp.joinDate) !== year) {
+      return emp;
+    }
+
+    const projectedBaseLeave = getCompletedMonthlyLeaveCount(emp.joinDate, targetDate);
+    const currentBaseLeave = Number(emp.baseLeave || 0);
+
+    if (projectedBaseLeave <= currentBaseLeave) {
+      return emp;
+    }
+
+    const adjustmentDays = Number(emp.adjustmentDays || 0);
+    const vacationDeductionDays = Number(emp.vacationDeductionDays || 0);
+    const usedLeave = Number(emp.usedLeave || 0);
+    const totalLeave = projectedBaseLeave + adjustmentDays - vacationDeductionDays;
+
+    return {
+      ...emp,
+      baseLeave: projectedBaseLeave,
+      totalLeave,
+      remainingLeave: totalLeave - usedLeave,
+    };
+  });
+}
+
+function makeProjectedKpi(kpi, employees) {
+  const totalLeave = employees.reduce((sum, row) => sum + Number(row.totalLeave || 0), 0);
+  const usedLeave = employees.reduce((sum, row) => sum + Number(row.usedLeave || 0), 0);
+  const remainingLeave = employees.reduce((sum, row) => sum + Number(row.remainingLeave || 0), 0);
+
+  return {
+    ...kpi,
+    totalLeave,
+    usedLeave,
+    remainingLeave,
+    usedRate: totalLeave > 0 ? Math.round((usedLeave / totalLeave) * 1000) / 10 : 0,
+    remainingRate: totalLeave > 0 ? Math.round((remainingLeave / totalLeave) * 1000) / 10 : 0,
+  };
+}
+
 function getDaysInMonth(year, month) {
   return new Date(year, month, 0).getDate();
 }
@@ -208,7 +273,11 @@ function App() {
   const [editingDeductionId, setEditingDeductionId] = useState("");
   const [editingAdjustmentId, setEditingAdjustmentId] = useState("");
 
-  const employees = dashboard?.employees ?? EMPTY_ARRAY;
+  const apiEmployees = dashboard?.employees ?? EMPTY_ARRAY;
+  const employees = useMemo(
+    () => projectEmployeeLeaveToYearEnd(apiEmployees, selectedYear),
+    [apiEmployees, selectedYear]
+  );
   const leaveUses = dashboard?.leaveUses ?? EMPTY_ARRAY;
   const adjustments = dashboard?.adjustments ?? EMPTY_ARRAY;
   const holidayWorks = dashboard?.holidayWorks ?? EMPTY_ARRAY;
@@ -218,7 +287,8 @@ function App() {
     () => mergeSupplementalPublicHolidays(apiPublicHolidays, selectedYear),
     [apiPublicHolidays, selectedYear]
   );
-  const kpi = dashboard?.kpi ?? EMPTY_OBJECT;
+  const apiKpi = dashboard?.kpi ?? EMPTY_OBJECT;
+  const kpi = useMemo(() => makeProjectedKpi(apiKpi, employees), [apiKpi, employees]);
 
   async function loadDashboard(year = selectedYear) {
     try {
@@ -984,7 +1054,7 @@ function DashboardView({
         <EmployeeTable employees={employees} showActions={false} />
 
         <p className="panel-note">
-          ※ 현재 근속은 한국 오늘 날짜 기준, 기본연차는 선택 연도 기준으로 계산됩니다.
+          ※ 현재 근속은 한국 오늘 날짜 기준, 기본연차는 선택 연도 말까지의 예상 발생분입니다.
         </p>
       </section>
 
