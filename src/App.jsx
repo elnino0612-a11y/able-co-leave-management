@@ -1955,14 +1955,12 @@ function MealAttendanceView({ selectedYear, selectedMonth, setSelectedMonth, row
       </div>
 
       <SimpleTable
-        headers={["직원명", "상태", "기본근무일", "연차", "회사휴가", "공휴일근무", "출근일수"]}
+        headers={["직원명", "상태", "기본근무일", "연차", "출근일수"]}
         rows={rows.map((row) => [
           row.employeeName,
           row.status,
           `${row.baseWorkDays}일`,
           `-${row.leaveDays}일`,
-          `-${row.vacationDays}일`,
-          `+${row.holidayWorkDays}일`,
           `${row.attendanceDays}일`,
         ])}
       />
