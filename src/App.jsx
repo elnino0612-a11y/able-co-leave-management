@@ -44,6 +44,8 @@ const SUPPLEMENTAL_PUBLIC_HOLIDAYS = {
   ],
 };
 
+const STORE_EMPLOYEE_NAMES = new Set(["김수경", "윤종희"]);
+
 function todayMonth() {
   return new Date().getMonth() + 1;
 }
@@ -218,6 +220,10 @@ function makeSummerVacationDates(year) {
   return makeDateRange(`${year}-08-10`, `${year}-08-17`);
 }
 
+function getMealEmployeeGroup(employeeName) {
+  return STORE_EMPLOYEE_NAMES.has(employeeName) ? "매장직원" : "물류직원";
+}
+
 function calculateMonthlyAttendanceRows({
   employees,
   leaveUses,
@@ -281,6 +287,7 @@ function calculateMonthlyAttendanceRows({
     return {
       employeeId: employee.employeeId,
       employeeName: employee.employeeName,
+      employeeGroup: getMealEmployeeGroup(employee.employeeName),
       status: employee.status || "재직",
       baseWorkDays: baseWorkDates.length,
       leaveDays: leaveDates.size,
@@ -1916,6 +1923,12 @@ function MealAttendanceView({ selectedYear, selectedMonth, setSelectedMonth, row
     (sum, row) => sum + Number(row.attendanceDays || 0),
     0
   );
+  const storeAttendanceDays = rows
+    .filter((row) => row.employeeGroup === "매장직원")
+    .reduce((sum, row) => sum + Number(row.attendanceDays || 0), 0);
+  const logisticsAttendanceDays = rows
+    .filter((row) => row.employeeGroup === "물류직원")
+    .reduce((sum, row) => sum + Number(row.attendanceDays || 0), 0);
 
   function prevMonth() {
     setSelectedMonth((prev) => (prev === 1 ? 12 : prev - 1));
@@ -1952,12 +1965,21 @@ function MealAttendanceView({ selectedYear, selectedMonth, setSelectedMonth, row
           <span className="dot green"></span> 전체 출근일수 합계
           <b>{totalAttendanceDays}일</b>
         </div>
+        <div>
+          <span className="dot orange"></span> 매장직원 출근일수
+          <b>{storeAttendanceDays}일</b>
+        </div>
+        <div>
+          <span className="dot blue"></span> 물류직원 출근일수
+          <b>{logisticsAttendanceDays}일</b>
+        </div>
       </div>
 
       <SimpleTable
-        headers={["직원명", "상태", "기본근무일", "연차", "출근일수"]}
+        headers={["직원명", "구분", "상태", "기본근무일", "연차", "출근일수"]}
         rows={rows.map((row) => [
           row.employeeName,
+          row.employeeGroup,
           row.status,
           `${row.baseWorkDays}일`,
           `-${row.leaveDays}일`,
