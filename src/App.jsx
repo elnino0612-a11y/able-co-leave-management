@@ -208,6 +208,16 @@ function makeDateRange(startString, endString) {
   return dates;
 }
 
+function isMealExcludedHoliday(row) {
+  const title = String(row.title || "");
+
+  return title.includes("신정") || title.includes("설날") || title.includes("추석");
+}
+
+function makeSummerVacationDates(year) {
+  return makeDateRange(`${year}-08-10`, `${year}-08-17`);
+}
+
 function calculateMonthlyAttendanceRows({
   employees,
   leaveUses,
@@ -219,14 +229,17 @@ function calculateMonthlyAttendanceRows({
 }) {
   const monthStart = `${year}-${pad2(month)}-01`;
   const monthEnd = `${year}-${pad2(month)}-${pad2(getDaysInMonth(year, month))}`;
-  const holidayDates = new Set(publicHolidays.map((row) => formatDate(row.date)));
+  const closedDates = new Set(
+    publicHolidays.filter(isMealExcludedHoliday).map((row) => formatDate(row.date))
+  );
+  makeSummerVacationDates(year).forEach((date) => closedDates.add(date));
   const monthDates = makeDateRange(monthStart, monthEnd);
 
   function isWorkdayForEmployee(date, employee) {
     return (
       date >= formatDate(employee.joinDate) &&
       !isWeekend(date) &&
-      !holidayDates.has(date)
+      !closedDates.has(date)
     );
   }
 
@@ -258,7 +271,7 @@ function calculateMonthlyAttendanceRows({
       holidayWorks
         .filter((row) => row["직원ID"] === employee.employeeId)
         .map((row) => formatDate(row["근무일자"]))
-        .filter((date) => date >= monthStart && date <= monthEnd)
+        .filter((date) => date >= monthStart && date <= monthEnd && !baseWorkDateSet.has(date))
     );
     const attendanceDays = Math.max(
       0,
@@ -1955,7 +1968,7 @@ function MealAttendanceView({ selectedYear, selectedMonth, setSelectedMonth, row
       />
 
       <p className="panel-note">
-        ※ 출근일수 = 평일 기준 근무일 - 연차 - 회사휴가 + 공휴일근무입니다. 공휴일과 주말은 기본근무일에서 제외됩니다.
+        ※ 출근일수 = 월~금 기본출근 - 연차 - 휴가차감일입니다. 신정, 설날, 추석, 여름휴가(8/10~8/17)는 기본출근에서 제외하고, 그 외 공휴일은 출근으로 계산합니다.
       </p>
     </section>
   );
