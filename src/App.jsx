@@ -14,6 +14,7 @@ import {
   Umbrella,
   User,
   Users,
+  Utensils,
 } from "lucide-react";
 import "./index.css";
 
@@ -27,6 +28,7 @@ const MENU = [
   { key: "leave", label: "연차 사용 관리", icon: CalendarDays },
   { key: "holiday", label: "공휴일 근무 관리", icon: ShieldCheck },
   { key: "vacation", label: "휴가 차감 관리", icon: Umbrella },
+  { key: "meal", label: "식대 출근일수", icon: Utensils },
   { key: "adjust", label: "연차 조정 관리", icon: ClipboardList },
   { key: "settings", label: "설정", icon: Settings },
 ];
@@ -176,6 +178,104 @@ function getDaysInMonth(year, month) {
 
 function getFirstDayIndex(year, month) {
   return new Date(year, month - 1, 1).getDay();
+}
+
+function isWeekend(dateString) {
+  const date = new Date(`${formatDate(dateString)}T00:00:00`);
+  const day = date.getDay();
+
+  return day === 0 || day === 6;
+}
+
+function makeDateRange(startString, endString) {
+  const start = formatDate(startString);
+  const end = formatDate(endString || startString);
+
+  if (!start || !end || end < start) return [];
+
+  const dates = [];
+  const cursor = new Date(`${start}T00:00:00`);
+  const endDate = new Date(`${end}T00:00:00`);
+
+  while (cursor <= endDate) {
+    const year = cursor.getFullYear();
+    const month = pad2(cursor.getMonth() + 1);
+    const day = pad2(cursor.getDate());
+    dates.push(`${year}-${month}-${day}`);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dates;
+}
+
+function calculateMonthlyAttendanceRows({
+  employees,
+  leaveUses,
+  holidayWorks,
+  vacationDeductions,
+  publicHolidays,
+  year,
+  month,
+}) {
+  const monthStart = `${year}-${pad2(month)}-01`;
+  const monthEnd = `${year}-${pad2(month)}-${pad2(getDaysInMonth(year, month))}`;
+  const holidayDates = new Set(publicHolidays.map((row) => formatDate(row.date)));
+  const monthDates = makeDateRange(monthStart, monthEnd);
+
+  function isWorkdayForEmployee(date, employee) {
+    return (
+      date >= formatDate(employee.joinDate) &&
+      !isWeekend(date) &&
+      !holidayDates.has(date)
+    );
+  }
+
+  return employees.map((employee) => {
+    const baseWorkDates = monthDates.filter((date) => isWorkdayForEmployee(date, employee));
+    const baseWorkDateSet = new Set(baseWorkDates);
+    const leaveDates = new Set(
+      leaveUses
+        .filter((row) => row["직원ID"] === employee.employeeId)
+        .map((row) => formatDate(row["사용일자"]))
+        .filter((date) => baseWorkDateSet.has(date))
+    );
+    const vacationDates = new Set();
+
+    vacationDeductions.forEach((row) => {
+      const appliesToEmployee =
+        row["적용대상"] === "전체" || row["직원ID"] === employee.employeeId;
+
+      if (!appliesToEmployee) return;
+
+      makeDateRange(row["시작일"], row["종료일"]).forEach((date) => {
+        if (baseWorkDateSet.has(date)) {
+          vacationDates.add(date);
+        }
+      });
+    });
+
+    const holidayWorkDates = new Set(
+      holidayWorks
+        .filter((row) => row["직원ID"] === employee.employeeId)
+        .map((row) => formatDate(row["근무일자"]))
+        .filter((date) => date >= monthStart && date <= monthEnd)
+    );
+    const attendanceDays = Math.max(
+      0,
+      baseWorkDates.length - leaveDates.size - vacationDates.size + holidayWorkDates.size
+    );
+
+    return {
+      employeeId: employee.employeeId,
+      employeeName: employee.employeeName,
+      status: employee.status || "재직",
+      baseWorkDays: baseWorkDates.length,
+      leaveDays: leaveDates.size,
+      vacationDays: vacationDates.size,
+      holidayWorkDays: holidayWorkDates.size,
+      attendanceDays,
+    };
+  });
 }
 
 function makeEmptyEmployeeForm() {
@@ -352,6 +452,26 @@ function App() {
         getMonthFromDate(row.date) === selectedMonth
     );
   }, [publicHolidays, selectedYear, selectedMonth]);
+
+  const monthlyAttendanceRows = useMemo(() => {
+    return calculateMonthlyAttendanceRows({
+      employees,
+      leaveUses,
+      holidayWorks,
+      vacationDeductions,
+      publicHolidays,
+      year: selectedYear,
+      month: selectedMonth,
+    });
+  }, [
+    employees,
+    leaveUses,
+    holidayWorks,
+    vacationDeductions,
+    publicHolidays,
+    selectedYear,
+    selectedMonth,
+  ]);
 
   async function handleAdminLogin() {
     try {
@@ -917,6 +1037,15 @@ function App() {
                   setVacationForm(makeEmptyVacationForm());
                   setEditingDeductionId("");
                 }}
+              />
+            )}
+
+            {activeMenu === "meal" && (
+              <MealAttendanceView
+                selectedYear={selectedYear}
+                selectedMonth={selectedMonth}
+                setSelectedMonth={setSelectedMonth}
+                rows={monthlyAttendanceRows}
               />
             )}
 
@@ -1765,6 +1894,69 @@ function VacationDeductionView({
           ),
         ])}
       />
+    </section>
+  );
+}
+
+function MealAttendanceView({ selectedYear, selectedMonth, setSelectedMonth, rows }) {
+  const totalAttendanceDays = rows.reduce(
+    (sum, row) => sum + Number(row.attendanceDays || 0),
+    0
+  );
+
+  function prevMonth() {
+    setSelectedMonth((prev) => (prev === 1 ? 12 : prev - 1));
+  }
+
+  function nextMonth() {
+    setSelectedMonth((prev) => (prev === 12 ? 1 : prev + 1));
+  }
+
+  return (
+    <section className="panel full">
+      <div className="panel-header">
+        <div>
+          <h2>식대 출근일수</h2>
+          <p className="section-desc">
+            {selectedYear}년 {selectedMonth}월 직원별 식대 기준 출근일수
+          </p>
+        </div>
+        <div className="calendar-actions">
+          <button className="small-btn" onClick={() => setSelectedMonth(todayMonth())}>
+            이번 달
+          </button>
+          <button className="small-btn" onClick={prevMonth}>
+            <ChevronLeft size={16} />
+          </button>
+          <button className="small-btn" onClick={nextMonth}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="summary-list">
+        <div>
+          <span className="dot green"></span> 전체 출근일수 합계
+          <b>{totalAttendanceDays}일</b>
+        </div>
+      </div>
+
+      <SimpleTable
+        headers={["직원명", "상태", "기본근무일", "연차", "회사휴가", "공휴일근무", "출근일수"]}
+        rows={rows.map((row) => [
+          row.employeeName,
+          row.status,
+          `${row.baseWorkDays}일`,
+          `-${row.leaveDays}일`,
+          `-${row.vacationDays}일`,
+          `+${row.holidayWorkDays}일`,
+          `${row.attendanceDays}일`,
+        ])}
+      />
+
+      <p className="panel-note">
+        ※ 출근일수 = 평일 기준 근무일 - 연차 - 회사휴가 + 공휴일근무입니다. 공휴일과 주말은 기본근무일에서 제외됩니다.
+      </p>
     </section>
   );
 }
